@@ -1,5 +1,14 @@
-import CryptoKit
+#if canImport(CryptoKit)
+    import CryptoKit  // Apple 平台
+#else
+    import Crypto  // swift-crypto：Linux 上的同名 API
+#endif
 import Foundation
+
+// Linux 把 URLSession/HTTPURLResponse 拆在 FoundationNetworking 里
+#if canImport(FoundationNetworking)
+    import FoundationNetworking
+#endif
 
 // ── Qwen 语音组件（P4-3：补回 DR-030 砍错的一刀）──────────
 //

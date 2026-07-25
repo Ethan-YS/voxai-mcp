@@ -59,3 +59,21 @@ swift build -c release
 ```
 
 `release.sh <version>` does the full distribution build: universal binary → Developer ID signing → zip → notarization → Gatekeeper verification.
+
+## Running it on Linux (and why you probably shouldn't)
+
+The server builds and runs on Linux, and it will complete the MCP handshake and
+report all 14 tools. It cannot do anything useful there: every tool reads or
+writes IPC files inside the VoxAI macOS app's sandbox container, and that app
+only exists on macOS. On a non-macOS host each tool call answers with a plain
+message saying exactly that, rather than silently returning empty data.
+
+```bash
+docker build -t voxai-mcp .
+docker run --rm -i voxai-mcp     # speaks MCP over stdio; tools report "needs the macOS app"
+```
+
+This exists so that directory sites which verify servers by starting them in a
+container are checking *this* server, not a stand-in written to pass the check.
+If you want the tools to actually work, install VoxAI on macOS 14+ and run the
+server there.

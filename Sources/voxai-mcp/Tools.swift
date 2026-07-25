@@ -284,6 +284,11 @@ func toolText(_ text: String, isError: Bool = false) -> CallTool.Result {
 // ── 分发 ─────────────────────────────────────────────────
 
 func dispatchTool(name: String, arguments: [String: Value]) async -> CallTool.Result {
+    // 非 macOS 平台：协议层照常服务，但工具没有宿主 App 可读写。
+    // 明说缺什么,不静默返回空数据(见 Compat.swift)。
+    guard Host.isSupported else {
+        return toolText(Host.unsupportedMessage)
+    }
     switch name {
     case "speak":
         let text = arguments.string("text")

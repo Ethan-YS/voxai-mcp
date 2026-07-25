@@ -1,5 +1,10 @@
 import Foundation
 
+// Linux 把 URLSession/HTTPURLResponse 拆在 FoundationNetworking 里
+#if canImport(FoundationNetworking)
+    import FoundationNetworking
+#endif
+
 // ── TTS 层 ───────────────────────────────────────────────
 // 三条路：
 //   system —— /usr/bin/say（= AVSpeechSynthesizer 的命令行形态，离线零
