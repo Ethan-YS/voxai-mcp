@@ -77,3 +77,15 @@ This exists so that directory sites which verify servers by starting them in a
 container are checking *this* server, not a stand-in written to pass the check.
 If you want the tools to actually work, install VoxAI on macOS 14+ and run the
 server there.
+
+## License
+
+Proprietary — see [LICENSE](LICENSE).
+
+You may download, install, and run this connector on machines you own or
+control, including at work, when using it together with VoxAI. You may not
+modify it, redistribute it, or use it to build a competing product.
+
+The source is published here so that anyone can read what a program they run on
+their own machine actually does. That transparency is the point; it is not an
+open-source grant.

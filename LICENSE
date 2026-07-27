@@ -1,0 +1,30 @@
+Copyright (c) 2026 Ethan Huang. All rights reserved.
+
+voxai-mcp is the companion connector for VoxAI (the "App").
+
+PERMITTED USE
+You may download, install, and run this software on machines you own or
+control, for any purpose including commercial use, when used together
+with the App.
+
+RESTRICTIONS
+You may not modify, adapt, reverse engineer, decompile, disassemble,
+redistribute, sublicense, sell, or create derivative works from this
+software, in whole or in part. You may not use this software or its
+source code to develop a product that competes with the App.
+
+ABOUT THE SOURCE CODE
+The source code is published so that anyone can review what this software
+does on their machine. Publication does not grant any license beyond the
+permissions stated above.
+
+NO WARRANTY
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+
+LIMITATION OF LIABILITY
+IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
