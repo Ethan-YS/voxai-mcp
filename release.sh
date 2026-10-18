@@ -35,6 +35,17 @@ echo "▸ [1/5] universal 构建（arm64 + x86_64）"
 swift build -c release --arch arm64 --arch x86_64
 lipo -info "$BIN"
 
+echo "▸ [1.5/5] strip 调试符号 + 个人路径扫描"
+# 不 strip 的 Release 二进制带着调试符号表(N_OSO / swiftmodule 路径),里面是构建机的
+# 家目录与用户名——v2.0.0 公开包里有 1030 处(10-17 发现)。直发版 08-18 同一事故。
+# -S 去调试符号,-x 去本地符号;导出符号与 Swift 元数据不受影响
+strip -S -x "$BIN"
+if LC_ALL=C grep -q -a -F "$HOME" "$BIN" || LC_ALL=C grep -q -a -F "/$(whoami)/" "$BIN"; then
+    echo "❌ 二进制里仍有构建机家目录 / 用户名,停止发布"
+    exit 1
+fi
+echo "  ✓ 无家目录 / 用户名"
+
 echo "▸ [2/5] Developer ID 签名（hardened runtime + 安全时间戳）"
 # --options runtime 是公证的硬性前提；--timestamp 保证证书过期后签名仍有效
 codesign --force --sign "$SIGN_ID" --options runtime --timestamp "$BIN"
