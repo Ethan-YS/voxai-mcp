@@ -253,7 +253,7 @@ enum Meetings {
                 ?? liveMap[s["id"] as? String ?? ""] ?? ""
             if !sp.isEmpty { speakers[String(i)] = sp }
         }
-        return [
+        var out: [String: Any] = [
             "live": true,
             "meetingId": meetingID,
             "title": latest["title"] as? String ?? "Untitled",
@@ -264,6 +264,29 @@ enum Meetings {
             "nextIndex": segments.count,
             "totalSegments": segments.count,
         ]
+        // 正在说、尚未成段的话(volatile)——副驾抢跑用,引用以 segments 为准
+        if let partial = livePartial() { out["partial"] = partial }
+        return out
+    }
+
+    // ── 实时半句预览(2.2)────────────────────────────────
+    // App 的 PartialTranscriptSink 写 {"me","partner","updatedAt"(Unix 秒)}。
+    // 超过 15s 没更新或两通道皆空 → 视为没有:App 停录 / 崩溃可能留下残文件,
+    // 新鲜度门保证不把旧话当成正在说(契约与直发版 server.py 一致)
+    static let partialMaxAge = 15.0
+
+    static func livePartial(now: Date = Date()) -> [String: Any]? {
+        let p = JSONFile.readDict(Paths.livePartial)
+        guard let updatedAt = (p["updatedAt"] as? Double) ?? (p["updatedAt"] as? Int).map(Double.init)
+        else { return nil }
+        let age = now.timeIntervalSince1970 - updatedAt
+        let me = (p["me"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let partner = (p["partner"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if age > partialMaxAge || (me.isEmpty && partner.isEmpty) { return nil }
+        var out: [String: Any] = ["ageSeconds": (max(0, age) * 10).rounded() / 10]
+        if !me.isEmpty { out["me"] = me }
+        if !partner.isEmpty { out["partner"] = partner }
+        return out
     }
 
     // ── 阻塞等待(旁听主循环)────────────────────────────────
@@ -355,7 +378,7 @@ enum Meetings {
                 advice.removeValue(forKey: old)
             }
         }
-        data = ["updatedAt": nowHMS(withDate: true), "advice": advice]
+        data = ["updatedAt": nowHMS(withDate: true, systemZone: true), "advice": advice]
         JSONFile.write(data, to: Paths.advice)
         return "Pushed (\(kindOK), #\(items.count))"
     }
@@ -371,8 +394,7 @@ enum Meetings {
 
         let segs = JSONFile.readDict(Paths.dialogInput)["segments"] as? [[String: Any]] ?? []
         let after = max(0, afterIndex)
-        let fmt = DateFormatter()
-        fmt.dateFormat = "HH:mm:ss"
+        let fmt = DisplayTime.formatter("HH:mm:ss")
         let out = segs.dropFirst(after).map { s -> [String: Any] in
             let ts = s["timestamp"] as? Double ?? 0    // 对话系文件是 Unix 历法
             return ["time": fmt.string(from: Date(timeIntervalSince1970: ts)),

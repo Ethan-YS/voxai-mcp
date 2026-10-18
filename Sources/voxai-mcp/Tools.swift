@@ -339,6 +339,10 @@ let allTools: [Tool] = [
         For the copilot's main loop prefer wait_live_transcript, which blocks \
         until there is something new.
 
+        While someone is mid-sentence the response also carries `partial`: \
+        the volatile text still being spoken (keys me / partner / \
+        ageSeconds) — anticipate with it, quote only finalized segments.
+
         When live is False: no meeting is in progress; lastMeetingId / \
         lastMeetingTitle of the most recent finished meeting are included for \
         post-meeting retrieval via get_meeting(). The scenario field \

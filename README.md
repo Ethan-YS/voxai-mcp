@@ -29,11 +29,11 @@ The VoxAI app is distributed through the Mac App Store, and sandboxed App Store 
 | | |
 |---|---|
 | `start_listening` / `stop_listening` | check in / out as the user's copilot — the app shows your name |
-| `wait_live_transcript` | the copilot's main loop: blocks until new speech arrives, keeps your presence alive while it waits |
+| `wait_live_transcript` | the copilot's main loop: blocks until new speech arrives, keeps your presence alive while it waits; also shows the sentence still being spoken (VoxAI 2.2+) |
 | `get_live_transcript` | one-shot read of new segments with a cursor |
 | `push_advice` | surface a note to the user, live, during the session |
 
-**Meeting archive**
+**Meeting archive** — times follow the time zone picked in VoxAI › Settings › Display (2.2+), so they match what the app shows
 | | |
 |---|---|
 | `list_meetings` | browse sessions; filter by date (`today`, `7d`, …), title, scenario, has-summary |

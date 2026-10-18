@@ -23,6 +23,8 @@ enum Paths {
     static let meetings     = dataDir.appendingPathComponent("meetings.json")
     static let sidecar      = dataDir.appendingPathComponent("live_speakers.json")
     static let dialogInput  = dataDir.appendingPathComponent("dialog_input.json")
+    // 实时半句预览(2.2 App 起写:volatile 文本,0.8s 节流;旧版 App 没有这个文件)
+    static let livePartial  = dataDir.appendingPathComponent("live_partial.json")
     // server 是写入方（App 读取）
     static let advice         = dataDir.appendingPathComponent("live_advice.json")
     static let listener       = dataDir.appendingPathComponent("listener.json")
@@ -68,21 +70,79 @@ enum JSONFile {
 // meetings.json 里的时间戳是 Apple 历法；dialog/listener/boot 系列是 Unix 历法。
 let appleEpochOffset = 978_307_200.0
 
-// Apple reference 时间戳 → 本地可读时间，非法值原样返回字符串
+// ── 显示时区(2.2;App 设置 → 显示 → 时区,经 config.json 的 display_timezone 共享)──
+// 给 AI 看的时间与 App 界面同一个时区:出差时 Mac 时区在变,用户可以钉住一个。
+// 没设 = 本机时区(与旧版行为一致)。fmtTime 逐段调用,配置读取缓存 2 秒、格式器按
+// (时区, 格式)缓存。返回体只给换算好的时间,不带时区名 / 偏移,说明里也不提
+// (AI 只读时间不读时区——直发版 10-17 Rebecca 拍板)。
+// 落盘给 App 读的时间串(live_advice.json 的 updatedAt 等)不走这里,保持本机时区。
+enum DisplayTime {
+    static let ttl: TimeInterval = 2
+    private static let lock = NSLock()
+    nonisolated(unsafe) private static var cachedAt = Date.distantPast
+    nonisolated(unsafe) private static var cachedZone: TimeZone = .autoupdatingCurrent
+    nonisolated(unsafe) private static var badID = ""
+    nonisolated(unsafe) private static var formatters: [String: DateFormatter] = [:]
+
+    /// 当前显示时区;名字非法 → 回退本机时区并在 stderr 记一次(别静默)
+    static var zone: TimeZone {
+        lock.lock(); defer { lock.unlock() }
+        let now = Date()
+        if now.timeIntervalSince(cachedAt) < ttl { return cachedZone }
+        let id = (JSONFile.readDict(Paths.config)["display_timezone"] as? String ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        var tz = TimeZone.autoupdatingCurrent
+        if !id.isEmpty {
+            if let z = TimeZone(identifier: id) {
+                tz = z
+            } else if badID != id {
+                FileHandle.standardError.write(Data(
+                    "[voxai-mcp] display_timezone \"\(id)\" unusable; using the system time zone\n".utf8))
+                badID = id
+            }
+        }
+        cachedZone = tz
+        cachedAt = now
+        return tz
+    }
+
+    /// 固定格式的格式器;en_US_POSIX + 公历,机读串不随用户地区 / 历法变形
+    static func formatter(_ format: String, zone tz: TimeZone? = nil) -> DateFormatter {
+        let tz = tz ?? zone
+        lock.lock(); defer { lock.unlock() }
+        let key = tz.identifier + "|" + format
+        if let f = formatters[key] { return f }
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.calendar = Calendar(identifier: .gregorian)
+        f.timeZone = tz
+        f.dateFormat = format
+        formatters[key] = f
+        return f
+    }
+
+    /// 显示时区下的公历日历(since/until 的「今天」「零点」用它算)
+    static var calendar: Calendar {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = zone
+        return cal
+    }
+}
+
+// Apple reference 时间戳 → 显示时区下的可读时间，非法值原样返回字符串
 func fmtTime(_ appleTS: Any?, withDate: Bool = false) -> String {
     guard let ts = appleTS as? Double else {
         if let n = appleTS as? Int { return fmtTime(Double(n), withDate: withDate) }
         return appleTS.map { "\($0)" } ?? ""
     }
     let date = Date(timeIntervalSince1970: ts + appleEpochOffset)
-    let fmt = DateFormatter()
-    fmt.dateFormat = withDate ? "yyyy-MM-dd HH:mm:ss" : "HH:mm:ss"
-    return fmt.string(from: date)
+    return DisplayTime.formatter(withDate ? "yyyy-MM-dd HH:mm:ss" : "HH:mm:ss").string(from: date)
 }
 
-// 本地当前时刻 "HH:mm:ss"（push_advice 的 time 字段用）
-func nowHMS(withDate: Bool = false) -> String {
-    let fmt = DateFormatter()
-    fmt.dateFormat = withDate ? "yyyy-MM-dd HH:mm:ss" : "HH:mm:ss"
-    return fmt.string(from: Date())
+// 当前时刻 "HH:mm:ss"。默认按显示时区(push_advice 的 time 字段:App 建议栏与导出照原样显示);
+// systemZone = true 给落盘的机读串用(保持本机时区)
+func nowHMS(withDate: Bool = false, systemZone: Bool = false) -> String {
+    DisplayTime.formatter(withDate ? "yyyy-MM-dd HH:mm:ss" : "HH:mm:ss",
+                          zone: systemZone ? .autoupdatingCurrent : nil)
+        .string(from: Date())
 }

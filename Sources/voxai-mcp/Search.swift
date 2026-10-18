@@ -39,11 +39,12 @@ enum Search {
     // ── 时间参数 ──────────────────────────────────────────
 
     /// since/until → Apple 参考秒。支持 YYYY-MM-DD[ HH:MM[:SS]]、today / yesterday、
-    /// 相对的 7d / 12h / 2w。纯日期作 until 时取次日零点(含当天)。按本机时区解释
+    /// 相对的 7d / 12h / 2w。纯日期作 until 时取次日零点(含当天)。
+    /// 钟点与「今天」都按显示时区解释——和 AI 拿到的时间串同一个区
     static func parseWhen(_ value: String, end: Bool = false) throws -> Double? {
         let v = value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         if v.isEmpty { return nil }
-        let cal = Calendar.current
+        let cal = DisplayTime.calendar
         let now = Date()
         let midnight = cal.startOfDay(for: now)
         var date: Date?
@@ -59,7 +60,8 @@ enum Search {
         } else {
             let fmt = DateFormatter()
             fmt.locale = Locale(identifier: "en_US_POSIX")
-            fmt.timeZone = .current
+            fmt.calendar = cal
+            fmt.timeZone = cal.timeZone
             for f in ["yyyy-MM-dd HH:mm:ss", "yyyy-MM-dd HH:mm", "yyyy-MM-dd'T'HH:mm:ss",
                       "yyyy-MM-dd'T'HH:mm", "yyyy-MM-dd"] {
                 fmt.dateFormat = f

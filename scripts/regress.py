@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""voxai-mcp 2.1 回归:临时数据目录 + 假会议,逐个工具验。用法: python3 scripts/regress.py .build/debug/voxai-mcp"""
+"""voxai-mcp 2.2 回归:临时数据目录 + 假会议,逐个工具验。用法: python3 scripts/regress.py .build/debug/voxai-mcp"""
 import json, os, subprocess, sys, tempfile, threading, time, uuid
 
 BIN = sys.argv[1]
@@ -92,11 +92,12 @@ def check(cond, label, detail=""):
 init = rpc("initialize", {"protocolVersion": "2025-06-18", "capabilities": {},
                           "clientInfo": {"name": "test", "version": "0"}})
 notify("notifications/initialized")
-check(init["result"]["serverInfo"]["version"] == "2.1.0", "serverInfo version 2.1.0", init["result"]["serverInfo"])
+check(init["result"]["serverInfo"]["version"] == "2.2.0", "serverInfo version 2.2.0", init["result"]["serverInfo"])
 instr = init["result"].get("instructions", "")
 check("wait_live_transcript" in instr and "set_meeting_summary" in instr and "search_meetings" in instr,
       "instructions mention new tools")
 check("com.ethanys.voxai" in instr and "VoxSage" not in instr, "instructions use store container path, no VoxSage")
+check("`partial`" in instr and "quote only finalized segments" in instr, "instructions explain partial")
 tools = [t["name"] for t in rpc("tools/list")["result"]["tools"]]
 check(len(tools) == 17 and {"wait_live_transcript", "set_meeting_summary", "search_meetings"} <= set(tools),
       f"17 tools ({len(tools)})", tools)
@@ -248,6 +249,138 @@ write_meetings()
 n = len(m_live["segments"])
 r = call("get_live_transcript", after_index=n)
 check(min(int(k) for k in r["speakers"]) == n - 40 and len(r["speakers"]) == 40, "label window 40")
+
+# ── 2.2 实时半句预览:live_partial.json → partial(15s 新鲜度门)──
+PARTIAL = os.path.join(tmp, "live_partial.json")
+
+
+def write_partial(me="", partner="", age=0.0):
+    with open(PARTIAL + ".tmp", "w") as f:
+        json.dump({"me": me, "partner": partner, "updatedAt": time.time() - age}, f, ensure_ascii=False)
+    os.replace(PARTIAL + ".tmp", PARTIAL)
+
+
+r = call("get_live_transcript", after_index=n)
+check(r["live"] and "partial" not in r, "no partial file -> no partial key")
+write_partial(me="我觉得这个预算还可以再")
+r = call("get_live_transcript", after_index=n)
+pt = r.get("partial") or {}
+check(pt.get("me") == "我觉得这个预算还可以再" and "partner" not in pt and 0 <= pt.get("ageSeconds", -1) < 3,
+      "fresh partial (me only)", r.get("partial"))
+write_partial(me="  ", partner="下周三之前", age=5)
+pt = call("get_live_transcript", after_index=n).get("partial") or {}
+check(pt.get("partner") == "下周三之前" and "me" not in pt and 4 <= pt.get("ageSeconds", 0) <= 7,
+      "partner-only partial, blank me dropped", pt)
+write_partial(me="旧的半句", age=20)
+check("partial" not in call("get_live_transcript", after_index=n), "stale partial (>15s) dropped")
+write_partial(me=" ", partner="")
+check("partial" not in call("get_live_transcript", after_index=n), "blank partial dropped")
+write_partial(me="正在说", partner="对方也在说")
+r = call("wait_live_transcript", after_index=n, timeout_s=1)
+check((r.get("partial") or {}).get("partner") == "对方也在说" and (r.get("partial") or {}).get("me") == "正在说",
+      "wait_live_transcript carries partial", r.get("partial"))
+with open(PARTIAL, "w") as f:
+    f.write("{broken")
+check("partial" not in call("get_live_transcript", after_index=n), "broken partial file ignored")
+m_live["endTime"] = time.time() - APPLE
+write_meetings()
+write_partial(me="会后残留")
+r = call("get_live_transcript", after_index=0)
+check(r["live"] is False and "partial" not in r, "not live -> no partial even if fresh")
+m_live["endTime"] = None
+write_meetings()
+os.remove(PARTIAL)
+
+# ── 2.2 显示时区:config.json 的 display_timezone(AI 只拿换算好的时间)──
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
+
+CONFIG = os.path.join(tmp, "config.json")
+local_off = datetime.now().astimezone().utcoffset()
+TZ = "Asia/Shanghai" if local_off != timedelta(hours=8) else "America/Los_Angeles"
+tzinfo = ZoneInfo(TZ)
+
+
+def fmt(apple_ts, tz=None, with_date=True):
+    dt = datetime.fromtimestamp(apple_ts + APPLE, tz)
+    return dt.strftime("%Y-%m-%d %H:%M:%S" if with_date else "%H:%M:%S")
+
+
+def set_tz(tzid):
+    cfg = {"cn_engine": "system", "speed": 1.0}
+    if tzid is not None:
+        cfg["display_timezone"] = tzid
+    with open(CONFIG, "w") as f:
+        json.dump(cfg, f)
+    time.sleep(2.2)   # server 端配置缓存 2s
+
+
+g = call("get_meeting", meeting_id=m_old["id"])
+check(g["startTime"] == fmt(m_old["startTime"]), "no display_timezone -> system zone (unchanged)", g["startTime"])
+set_tz(TZ)
+g = call("get_meeting", meeting_id=m_old["id"])
+check(g["startTime"] == fmt(m_old["startTime"], tzinfo) and g["endTime"] == fmt(m_old["endTime"], tzinfo),
+      f"get_meeting times in {TZ}", (g["startTime"], fmt(m_old["startTime"], tzinfo)))
+check(g["segments"][0]["timestamp"] == fmt(m_old["segments"][0]["timestamp"], tzinfo, with_date=False),
+      "segment timestamp in display zone", g["segments"][0])
+check(g["summary"]["generatedAt"] == fmt(m_old["summary"]["generatedAt"], tzinfo), "summary generatedAt in display zone")
+lm = {m["id"]: m for m in call("list_meetings")}
+check(lm[m_call["id"]]["startTime"] == fmt(m_call["startTime"], tzinfo), "list_meetings startTime in display zone")
+lt = call("get_live_transcript", after_index=0)
+check(lt["startTime"] == fmt(m_live["startTime"], tzinfo), "live transcript startTime in display zone")
+sm = call("search_meetings", query="预算")
+check(sm["meetings"][0]["startTime"] == fmt(m_old["startTime"], tzinfo), "search_meetings startTime in display zone")
+blob = json.dumps([g, list(lm.values()), lt, sm], ensure_ascii=False)
+check(TZ not in blob and "GMT" not in blob and "UTC" not in blob and "+08" not in blob and "-07" not in blob,
+      "responses carry no time zone name / offset")
+tl = [t for t in rpc("tools/list")["result"]["tools"]]
+check(not any(w in json.dumps(tl) + instr for w in ("display_timezone", "time zone", "timezone", "local time")),
+      "tool descriptions / instructions don't mention time zones")
+# since/until 按显示时区解释:同一个钟点串,换成本机时区解释会差好几个小时
+call_wall = datetime.fromtimestamp(m_call["startTime"] + APPLE, tzinfo)
+ids = [m["id"] for m in call("list_meetings", since=(call_wall - timedelta(minutes=1)).strftime("%Y-%m-%d %H:%M"))]
+check(m_call["id"] in ids and m_old["id"] not in ids, "since 'YYYY-MM-DD HH:MM' read in display zone (1 min before)", ids)
+ids = [m["id"] for m in call("list_meetings", since=(call_wall + timedelta(minutes=1)).strftime("%Y-%m-%d %H:%M"))]
+check(m_call["id"] not in ids, "since 1 min after excludes", ids)
+ids = [m["id"] for m in call("list_meetings", until=call_wall.strftime("%Y-%m-%d"))]
+check(m_call["id"] in ids and m_live["id"] not in ids, "date-only until = whole day in display zone", ids)
+# today = 显示时区的今天零点:零点前后各一分钟各造一场
+midnight = datetime.now(tzinfo).replace(hour=0, minute=0, second=0, microsecond=0)
+m_before = {"id": str(uuid.uuid4()).upper(), "title": "零点前", "scenario": "meeting",
+            "startTime": midnight.timestamp() - 60 - APPLE, "endTime": midnight.timestamp() - 30 - APPLE, "segments": []}
+m_after = {"id": str(uuid.uuid4()).upper(), "title": "零点后", "scenario": "meeting",
+           "startTime": midnight.timestamp() + 60 - APPLE, "endTime": midnight.timestamp() + 90 - APPLE, "segments": []}
+meetings[1:1] = [m_after, m_before]
+write_meetings()
+ids = [m["id"] for m in call("list_meetings", since="today")]
+check(m_after["id"] in ids and m_before["id"] not in ids, "since=today uses display-zone midnight", ids)
+ids = [m["id"] for m in call("list_meetings", until="yesterday")]
+check(m_before["id"] in ids and m_after["id"] not in ids, "until=yesterday ends at display-zone midnight", ids)
+meetings.remove(m_before); meetings.remove(m_after)
+write_meetings()
+# 推卡时间(App 建议栏 / 导出照原样显示)按显示时区;落盘的 updatedAt 保持本机时区
+before = datetime.now(tzinfo)
+call("push_advice", text="确认交付日期", kind="check")
+after = datetime.now(tzinfo)
+adv = json.load(open(os.path.join(tmp, "live_advice.json")))
+item = adv["advice"][m_live["id"]][-1]
+check(item["time"] in {before.strftime("%H:%M:%S"), after.strftime("%H:%M:%S")}, "push_advice time in display zone", item["time"])
+upd = datetime.strptime(adv["updatedAt"], "%Y-%m-%d %H:%M:%S")
+check(abs((upd - datetime.now()).total_seconds()) < 5, "advice file updatedAt stays system zone", adv["updatedAt"])
+# 语音直达(对话系文件是 Unix 历法)
+dts = time.time() - 30
+with open(os.path.join(tmp, "dialog_input.json"), "w") as f:
+    json.dump({"segments": [{"timestamp": dts, "text": "你好"}]}, f)
+di = call("get_dialog_input", after_index=0)
+check(di["segments"][0]["time"] == datetime.fromtimestamp(dts, tzinfo).strftime("%H:%M:%S"), "dialog input time in display zone", di)
+# 非法时区名:回退本机时区,不报错
+set_tz("Mars/Olympus_Mons")
+g = call("get_meeting", meeting_id=m_old["id"], include_transcript=False)
+check(g["startTime"] == fmt(m_old["startTime"]), "invalid zone -> system zone fallback", g["startTime"])
+# 回到跟随系统(App 删键)
+set_tz(None)
+g = call("get_meeting", meeting_id=m_old["id"], include_transcript=False)
+check(g["startTime"] == fmt(m_old["startTime"]), "key removed -> system zone again", g["startTime"])
 
 p.stdin.close()
 p.wait(timeout=5)

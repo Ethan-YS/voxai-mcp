@@ -48,6 +48,10 @@ response still ends with the next wait.
        sleep 2; i=$((i+1)); done
    then call get_live_transcript(after_index=cursor) on each wake — and
    in that mode, launch the watcher BEFORE you write anything to the user.
+   The response may carry `partial` — the sentence being spoken RIGHT NOW
+   (volatile, still changing; me / partner channels). Use it to anticipate
+   and start composing advice early, especially during long monologues;
+   quote only finalized segments, never the partial text.
 3. Push advice with push_advice() only when genuinely useful (fact
    checks, risks, follow-up questions, strategy). One point per call,
    short and scannable. Judgement before interruption: most segments

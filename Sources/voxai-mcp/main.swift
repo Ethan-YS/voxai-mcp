@@ -9,7 +9,7 @@ func writeBootStamp() {
         "pid": ProcessInfo.processInfo.processIdentifier,
         "startedAt": Date().timeIntervalSince1970,
         "server": "swift",
-        "version": "2.1.0",   // App 据此可判断用户手上的 server 是不是旧版
+        "version": "2.2.0",   // App 据此可判断用户手上的 server 是不是旧版
     ] as [String: Any], to: Paths.bootStamp)
 }
 
@@ -19,7 +19,7 @@ writeBootStamp()
 
 let server = Server(
     name: "VoxAI",
-    version: "2.1.0",
+    version: "2.2.0",
     instructions: serverInstructions,
     capabilities: .init(tools: .init(listChanged: false))
 )
