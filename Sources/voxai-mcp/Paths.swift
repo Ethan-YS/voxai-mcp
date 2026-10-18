@@ -8,6 +8,11 @@ import Foundation
 // 换成容器路径。macOS 14+ 外部进程首次访问他人容器会弹一次性 TCC 授权。
 enum Paths {
     static let dataDir: URL = {
+        // 测试用:VOXAI_MCP_DATA_DIR 指向一个临时目录,回归脚本造假会议不碰真容器
+        if let override = ProcessInfo.processInfo.environment["VOXAI_MCP_DATA_DIR"],
+           !override.isEmpty {
+            return URL(fileURLWithPath: override, isDirectory: true)
+        }
         let home = FileManager.default.homeDirectoryForCurrentUser
         return home
             .appendingPathComponent("Library/Containers/com.ethanys.voxai/Data")
@@ -25,9 +30,13 @@ enum Paths {
     static let dialogOutput   = dataDir.appendingPathComponent("dialog_output.json")
     static let dialogListener = dataDir.appendingPathComponent("dialog_listener.json")
     static let renameRequests = dataDir.appendingPathComponent("rename_requests.json")
+    static let summaryRequests = dataDir.appendingPathComponent("summary_requests.json")
     static let recentTTS      = dataDir.appendingPathComponent("recent_tts.json")
     // 双方读写（App 设置页 P4 起写，server 的 update_voice_config 也写）
     static let config       = dataDir.appendingPathComponent("config.json")
+    // App 启动时写(2.1 起):版本与它认得的通道。server 据此判断写回类工具
+    // (提要)对面有没有人接——旧版 App 不读 summary_requests.json,排了队也白排
+    static let appInfo      = dataDir.appendingPathComponent("app_info.json")
 }
 
 // ── JSON 便捷读写（对齐 server.py：读失败给默认值，写走原子替换）──

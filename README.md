@@ -23,16 +23,24 @@ Then register it with your AI client as a stdio MCP server pointing at `~/.local
 
 The VoxAI app is distributed through the Mac App Store, and sandboxed App Store apps can't ship a helper that an external process (your AI client) is allowed to launch — a bundled executable must carry a sandbox entitlement, and one that inherits it can only be sub-launched by its parent app. Compliant means unlaunchable; launchable means non-compliant. So the server lives here instead, outside the store, signed and notarized under the same Developer ID.
 
-## Tools (14)
+## Tools (17)
 
 **Listening**
 | | |
 |---|---|
 | `start_listening` / `stop_listening` | check in / out as the user's copilot — the app shows your name |
-| `get_live_transcript` | poll new segments with a cursor |
-| `list_meetings` / `get_meeting` | browse and read past sessions |
-| `rename_meeting` | give a session a real title |
+| `wait_live_transcript` | the copilot's main loop: blocks until new speech arrives, keeps your presence alive while it waits |
+| `get_live_transcript` | one-shot read of new segments with a cursor |
 | `push_advice` | surface a note to the user, live, during the session |
+
+**Meeting archive**
+| | |
+|---|---|
+| `list_meetings` | browse sessions; filter by date (`today`, `7d`, …), title, scenario, has-summary |
+| `get_meeting` | read a session — its summary first, the full transcript on request |
+| `search_meetings` | which meeting discussed X, who said X — across titles, summaries and transcripts, with pinyin fuzzy matching for Chinese |
+| `set_meeting_summary` | write a summary back into the app (needs VoxAI 2.1+) |
+| `rename_meeting` | give a session a real title |
 
 **Speaking**
 | | |

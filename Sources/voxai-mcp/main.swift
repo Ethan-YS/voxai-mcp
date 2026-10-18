@@ -18,7 +18,7 @@ writeBootStamp()
 
 let server = Server(
     name: "VoxAI",
-    version: "2.0.0",
+    version: "2.1.0",
     instructions: serverInstructions,
     capabilities: .init(tools: .init(listChanged: false))
 )

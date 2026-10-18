@@ -24,6 +24,22 @@ private func num(_ desc: String) -> Value {
     .object(["type": .string("number"), "description": .string(desc)])
 }
 
+private func bool(_ desc: String) -> Value {
+    .object(["type": .string("boolean"), "description": .string(desc)])
+}
+
+private func strList(_ desc: String) -> Value {
+    .object(["type": .string("array"), "items": .object(["type": .string("string")]),
+             "description": .string(desc)])
+}
+
+private func strListMap(_ desc: String) -> Value {
+    .object(["type": .string("object"),
+             "additionalProperties": .object(["type": .string("array"),
+                                              "items": .object(["type": .string("string")])]),
+             "description": .string(desc)])
+}
+
 // ── 参数读取便捷层 ───────────────────────────────────────
 
 private extension [String: Value] {
@@ -37,9 +53,32 @@ private extension [String: Value] {
         self[key]?.doubleValue ?? self[key]?.intValue.map(Double.init)
     }
     func stringOrNil(_ key: String) -> String? { self[key]?.stringValue }
+    func boolOrNil(_ key: String) -> Bool? {
+        if let b = self[key]?.boolValue { return b }
+        // 有的客户端把布尔传成字符串
+        switch self[key]?.stringValue?.lowercased() {
+        case "true", "1", "yes": return true
+        case "false", "0", "no": return false
+        default: return nil
+        }
+    }
+    /// 字符串数组;单个字符串也收(当一条)
+    func strings(_ key: String) -> [String] {
+        if let arr = self[key]?.arrayValue { return arr.compactMap(\.stringValue) }
+        return self[key]?.stringValue.map { [$0] } ?? []
+    }
+    func stringLists(_ key: String) -> [String: [String]] {
+        guard let obj = self[key]?.objectValue else { return [:] }
+        var out: [String: [String]] = [:]
+        for (k, v) in obj {
+            if let arr = v.arrayValue { out[k] = arr.compactMap(\.stringValue) }
+            else if let one = v.stringValue { out[k] = [one] }
+        }
+        return out
+    }
 }
 
-// ── 13 工具定义（描述逐条平移自直发版 server.py docstring）──
+// ── 17 工具定义（描述逐条平移自直发版 server.py docstring）──
 
 let allTools: [Tool] = [
     // ── 语音输出 ──
@@ -112,27 +151,127 @@ let allTools: [Tool] = [
     Tool(
         name: "list_meetings",
         description: """
-        List summary info for all recorded meetings.
+        List recorded meetings, newest first. With no arguments, returns all.
 
-        Returns one entry per meeting: id, title, scenario ("meeting" / \
-        "call" / "in_person"), startTime, endTime, isLive, segmentCount, \
-        preview (excerpt of the first segment).
+        Filters (all optional, combined with AND): since / until — start-time \
+        bounds: "2026-10-01", "2026-10-01 14:00", "today", "yesterday", or \
+        relative "7d" / "12h" / "2w" (a date-only `until` includes that whole \
+        day); title_contains — substring of the title ("a|b" = either); \
+        scenario — "meeting" / "call" / "in_person" ("call|in_person" = \
+        either); has_summary — true = only meetings with an AI summary; \
+        limit — at most this many (the newest), 0 = no limit; \
+        include_preview — false drops the first-segment preview.
+
+        To find meetings by what was said in them, use search_meetings.
+
+        Returns one entry per meeting: id, title, scenario, startTime, \
+        endTime, isLive, segmentCount, hasSummary, preview (excerpt of the \
+        first segment).
         """,
-        inputSchema: schema()
+        inputSchema: schema([
+            "since": str("Start-time lower bound (\"2026-10-01\", \"today\", \"7d\", ...)"),
+            "until": str("Start-time upper bound (a date-only value includes that day)"),
+            "title_contains": str("Only titles containing this (\"a|b\" = either)"),
+            "scenario": str("\"meeting\" / \"call\" / \"in_person\" (\"a|b\" = either)"),
+            "has_summary": bool("true = only meetings that have an AI summary; false = only those without"),
+            "limit": int("At most this many meetings (newest first); 0 = no limit"),
+            "include_preview": bool("false drops the first-segment preview (default true)"),
+        ])
     ),
     Tool(
         name: "get_meeting",
         description: """
-        Get the full content of a meeting, including all transcript segments \
-        and speaker labels.
+        Get a meeting: its summary (if an AI wrote one, see \
+        set_meeting_summary) and, by default, the full transcript with \
+        speaker labels.
+
+        To analyze a past meeting, call this first with \
+        include_transcript=false: a long meeting's transcript is tens of \
+        thousands of characters, while the summary is a screenful. Read the \
+        transcript only when the summary does not answer the question.
 
         Speaker values are canonical: "me" / "partner" (call mode), \
         "speaker_1", "speaker_2", ... (voice diarization), a custom name \
         assigned by the user, or "" when not yet labeled.
+
+        Returns id, title, scenario, startTime, endTime, isLive, summary \
+        (null when none), segmentCount, and — unless include_transcript=false \
+        — segments (each with timestamp, speaker, text).
         """,
         inputSchema: schema([
             "meeting_id": str("Meeting ID (from list_meetings())"),
+            "include_transcript": bool("false = summary and metadata only (no segments). Default true"),
         ], required: ["meeting_id"])
+    ),
+    Tool(
+        name: "set_meeting_summary",
+        description: """
+        Write the meeting's summary back into the app (shown on the \
+        meeting's Summary tab, included in exports, returned first by \
+        get_meeting). Do this right after a meeting you listened to ends — \
+        or after reading a past meeting that has none — so the next \
+        analysis starts from the summary instead of the full transcript.
+
+        Write for someone who will NOT read the transcript. Four blocks, in \
+        the user's language, each only if there is substance: overview — \
+        conclusions and decisions, 3-8 sentences; action_items — "who · \
+        what · by when", one per item; key_facts — numbers, names, quotes \
+        worth keeping verbatim; open_questions — unresolved points, things \
+        to follow up. by_speaker optionally maps a speaker label to their key \
+        points. Replaces any previous summary for the meeting; the app \
+        applies it within a few seconds.
+        """,
+        inputSchema: schema([
+            "meeting_id": str("Meeting ID (from list_meetings() / get_live_transcript())"),
+            "overview": str("Conclusions and decisions (required)"),
+            "action_items": strList("Action items, one per entry"),
+            "key_facts": strList("Key numbers / names / quotes"),
+            "open_questions": strList("Open questions"),
+            "by_speaker": strListMap("{speaker label: [their key points]}"),
+            "by": str("Your display name (e.g. \"Claude\")"),
+        ], required: ["meeting_id", "overview"])
+    ),
+    Tool(
+        name: "search_meetings",
+        description: """
+        Search across all meetings — titles, AI summaries and transcripts — \
+        for which meeting discussed X, who said X, or when X came up. Use \
+        this instead of reading transcripts one by one.
+
+        Query syntax: space-separated terms must ALL appear somewhere in the \
+        same meeting (not necessarily the same sentence); "a|b" inside a \
+        term = either. Matching is case- and width-insensitive substring (no \
+        word segmentation, so Chinese works as-is). Transcripts are speech \
+        recognition output with homophone errors — for names and jargon, \
+        expand likely variants yourself, e.g. "婉婷|宛婷|万婷", or set \
+        fuzzy="pinyin" to match any characters with the same pinyin.
+
+        Returns matchedMeetings (total) and meetings: [{id, title, scenario, \
+        startTime, isLive, hasSummary, titleMatch, summaryHits: [{field, \
+        text}], transcriptHits: [{index, timestamp, speaker, text, before, \
+        after}], totalHits, moreHits}]. `index` is the segment's position in \
+        get_meeting(id)'s segments; `timestamp` is when that line ended. Long \
+        lines are cut to the part around the match ("…"). With fuzzy, a hit \
+        found only by sound carries `heardAs` — the characters that matched \
+        (a real ASR error, or a coincidence): judge those before relying on \
+        them. Exact hits rank first.
+        """,
+        inputSchema: schema([
+            "query": str("e.g. \"预算|报价 蓝湖\" (= (预算 or 报价) and 蓝湖)"),
+            "since": str("Start-time lower bound, same formats as list_meetings"),
+            "until": str("Start-time upper bound (a date-only value includes that day)"),
+            "title_contains": str("Only meetings whose title contains this (\"a|b\" = either)"),
+            "scenario": str("\"meeting\" / \"call\" / \"in_person\" (\"a|b\" = either)"),
+            "speaker": str("Only transcript lines by this speaker (\"me\", \"partner\", "
+                + "\"speaker_2\", or a name; \"a|b\" = either)"),
+            "scope": str("\"both\" (default) / \"summary\" / \"transcript\""),
+            "fuzzy": str("\"\" exact (default) / \"pinyin\" = same pinyin ignoring tones "
+                + "(婉婷 finds 宛婷) / \"near\" = also zh~z ch~c sh~s n~l and -ng~-n (accents). "
+                + "Best for 2+ character names and terms; single characters over-match"),
+            "limit": int("Max meetings returned, newest first (default 10)"),
+            "hits_per_meeting": int("Max summary hits and transcript hits per meeting (default 3)"),
+            "context": int("Transcript lines shown before/after each hit, 0-3 (default 1)"),
+        ], required: ["query"])
     ),
     Tool(
         name: "rename_meeting",
@@ -188,13 +327,17 @@ let allTools: [Tool] = [
         nextIndex as after_index so only new segments are returned; empty \
         segments means nothing new yet.
 
-        Speaker labels lag 30-60s behind the text (filled in by a background \
-        worker), and the incremental cursor never re-sends old segments — so \
-        every response also carries `speakers`: the CURRENT label map for ALL \
-        segments ({"<index>": "<speaker>"}, 0-based global indices, unlabeled \
-        segments omitted). On every poll, refresh the labels of segments you \
+        Speaker labels lag 30-60s behind the text, and the incremental cursor \
+        never re-sends old segments — so every response also carries \
+        `speakers`: the CURRENT label map ({"<index>": "<speaker>"}, 0-based \
+        global indices, unlabeled segments omitted) from ~40 segments before \
+        your cursor onward (older labels are final; after_index=0 covers \
+        everything). On every poll, refresh the labels of segments you \
         already fetched from this map. Values are canonical: "me" / "partner" \
         / "speaker_N" / custom name.
+
+        For the copilot's main loop prefer wait_live_transcript, which blocks \
+        until there is something new.
 
         When live is False: no meeting is in progress; lastMeetingId / \
         lastMeetingTitle of the most recent finished meeting are included for \
@@ -206,14 +349,41 @@ let allTools: [Tool] = [
         ])
     ),
     Tool(
+        name: "wait_live_transcript",
+        description: """
+        Block until there is something new, then return what \
+        get_live_transcript(after_index) returns — minus the meeting header \
+        (title / scenario / startTime) when it is still the same meeting you \
+        were in when you called, so a long meeting stays cheap to follow. \
+        `meetingId` is always present: a changed id means a new meeting and \
+        then the full header comes along. This is the copilot's main loop — \
+        no background shell watcher needed:
+
+            r = wait_live_transcript(cursor) → judge → push_advice() if \
+            useful → cursor = r["nextIndex"] → wait_live_transcript again
+
+        Returns as soon as one of these happens: new segments beyond \
+        after_index (within ~1s of the app committing them); the meeting \
+        starts, ends (live flips to false) or a new one begins (meetingId \
+        changes — fetch it from after_index=0); timeout_s passes in silence \
+        (segments empty: just call again). Your listening heartbeat is \
+        refreshed throughout the wait, so the app keeps showing you as \
+        present while you are blocked here.
+        """,
+        inputSchema: schema([
+            "after_index": int("Your cursor — the previous response's nextIndex (0 on the first call)"),
+            "timeout_s": num("Max seconds to wait (default 300, capped at 600)"),
+        ])
+    ),
+    Tool(
         name: "start_listening",
         description: """
         Check in as the live-listening agent. The app's advice panel then \
         shows "<name> · Listening" so the user can see their AI is actually \
         connected. Call this once when entering listening mode; after that, \
-        every get_live_transcript() poll refreshes the heartbeat \
-        automatically (the app treats a heartbeat older than ~3 minutes as \
-        disconnected, so keep polling every 30-60s).
+        loop on wait_live_transcript(), which refreshes the heartbeat even \
+        while it blocks (the app treats a heartbeat older than ~3 minutes as \
+        disconnected).
         """,
         inputSchema: schema([
             "name": str("Display name shown in the app (e.g. \"Claude\", \"Codex\")"),
@@ -327,10 +497,49 @@ func dispatchTool(name: String, arguments: [String: Value]) async -> CallTool.Re
             language: arguments.stringOrNil("language")))
 
     case "list_meetings":
-        return toolJSON(Meetings.listMeetings())
+        do {
+            return toolJSON(try Meetings.listMeetings(
+                since: arguments.string("since"),
+                until: arguments.string("until"),
+                titleContains: arguments.string("title_contains"),
+                scenario: arguments.string("scenario"),
+                hasSummary: arguments.boolOrNil("has_summary"),
+                limit: arguments.integer("limit"),
+                includePreview: arguments.boolOrNil("include_preview") ?? true))
+        } catch let e as Search.BadArgument {
+            return toolText(e.message, isError: true)
+        } catch {
+            return toolText("\(error)", isError: true)
+        }
 
     case "get_meeting":
-        return toolJSON(Meetings.getMeeting(id: arguments.string("meeting_id")))
+        return toolJSON(Meetings.getMeeting(
+            id: arguments.string("meeting_id"),
+            includeTranscript: arguments.boolOrNil("include_transcript") ?? true))
+
+    case "set_meeting_summary":
+        return toolText(Meetings.setMeetingSummary(
+            id: arguments.string("meeting_id"),
+            overview: arguments.string("overview"),
+            actionItems: arguments.strings("action_items"),
+            keyFacts: arguments.strings("key_facts"),
+            openQuestions: arguments.strings("open_questions"),
+            bySpeaker: arguments.stringLists("by_speaker"),
+            by: arguments.string("by", default: "AI")))
+
+    case "search_meetings":
+        return toolJSON(Search.searchMeetings(
+            query: arguments.string("query"),
+            since: arguments.string("since"),
+            until: arguments.string("until"),
+            titleContains: arguments.string("title_contains"),
+            scenario: arguments.string("scenario"),
+            speaker: arguments.string("speaker"),
+            scope: arguments.string("scope", default: "both"),
+            fuzzy: arguments.string("fuzzy"),
+            limit: arguments.integer("limit", default: 10),
+            hitsPerMeeting: arguments.integer("hits_per_meeting", default: 3),
+            context: arguments.integer("context", default: 1)))
 
     case "rename_meeting":
         return toolText(Meetings.renameMeeting(
@@ -347,6 +556,11 @@ func dispatchTool(name: String, arguments: [String: Value]) async -> CallTool.Re
     case "get_live_transcript":
         return toolJSON(Meetings.getLiveTranscript(
             afterIndex: arguments.integer("after_index")))
+
+    case "wait_live_transcript":
+        return toolJSON(await Meetings.waitLiveTranscript(
+            afterIndex: arguments.integer("after_index"),
+            timeout: arguments.number("timeout_s") ?? Meetings.waitDefaultTimeout))
 
     case "start_listening":
         return toolJSON(Meetings.startListening(
