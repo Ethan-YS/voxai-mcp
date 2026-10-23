@@ -344,6 +344,30 @@ enum Meetings {
     static let adviceKinds: Set<String> =
         ["check", "ask", "risk", "strategy", "emotion", "action", "note"]
 
+    // 推卡文件最多留几场会议(按会议开始时间留最近的)。推卡只存在这个文件里,裁掉就是永久丢;
+    // App 每次推卡在主线程整份重读,200 场约 3.7MB、重读约 23ms(直发版 10-23 实测)
+    static let adviceKeepMeetings = 200
+
+    // 超过 keep 场时按会议开始时间留最近的 keep 场;正在推卡的这场永远留。
+    // key 是会议 UUID,不能按 key 排序(旧规则按字典序删,删的是随机场次;直发版 10-23
+    // 查出 66 场推卡被删光)。meetings.json 里已经没有的场次(会议被删了)当最老先裁。
+    static func pruneAdvice(_ advice: [String: [[String: Any]]], meetings: [[String: Any]],
+                            keep: Int, current: String) -> [String: [[String: Any]]] {
+        let keep = max(1, keep)
+        guard advice.count > keep else { return advice }
+        var starts: [String: Double] = [:]
+        for m in meetings {
+            if let id = m["id"] as? String { starts[id] = m["startTime"] as? Double ?? -.infinity }
+        }
+        let ranked = advice.keys.sorted { a, b in
+            if (a == current) != (b == current) { return a == current }
+            let sa = starts[a] ?? -.infinity, sb = starts[b] ?? -.infinity
+            return sa != sb ? sa > sb : a < b
+        }
+        let kept = Set(ranked.prefix(keep))
+        return advice.filter { kept.contains($0.key) }
+    }
+
     static func pushAdvice(text: String, kind: String, ref: String, label: String) -> String {
         // 推卡也是在场证明——连发建议的间隙不该被面板判成离场
         // (直发版 07-30 实测:AI 持续推卡,面板却显示「还没进来旁听」)
@@ -372,12 +396,7 @@ enum Meetings {
         if !labelClean.isEmpty { item["label"] = labelClean }
         items.append(item)
         advice[mid] = items
-        // 只保留最近 20 场会议的建议，防止无限增长
-        if advice.count > 20 {
-            for old in advice.keys.sorted().prefix(advice.count - 20) where old != mid {
-                advice.removeValue(forKey: old)
-            }
-        }
+        advice = pruneAdvice(advice, meetings: meetings, keep: adviceKeepMeetings, current: mid)
         data = ["updatedAt": nowHMS(withDate: true, systemZone: true), "advice": advice]
         JSONFile.write(data, to: Paths.advice)
         return "Pushed (\(kindOK), #\(items.count))"
