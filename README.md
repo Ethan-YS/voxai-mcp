@@ -71,7 +71,7 @@ swift build -c release
 ## Running it on Linux (and why you probably shouldn't)
 
 The server builds and runs on Linux, and it will complete the MCP handshake and
-report all 14 tools. It cannot do anything useful there: every tool reads or
+report all 17 tools. It cannot do anything useful there: every tool reads or
 writes IPC files inside the VoxAI macOS app's sandbox container, and that app
 only exists on macOS. On a non-macOS host each tool call answers with a plain
 message saying exactly that, rather than silently returning empty data.
