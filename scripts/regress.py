@@ -132,11 +132,11 @@ check(not os.path.exists(os.path.join(tmp, "summary_requests.json")), "no queue 
 with open(os.path.join(tmp, "app_info.json"), "w") as f:
     json.dump({"version": "2.1.0", "channels": ["rename", "summary"]}, f)
 s = call("set_meeting_summary", meeting_id=m_call["id"], overview="确认进入第二轮", action_items=["我 · 准备材料", "  "],
-         key_facts="张峰参加下一轮", by_speaker={"partner": ["流程第二轮"], "": ["x"]}, by="Sage")
+         key_facts="张峰参加下一轮", by_speaker={"partner": ["流程第二轮"], "": ["x"]}, by="Copilot")
 check(isinstance(s, str) and s.startswith("Summary queued"), "summary queued", s)
 q = json.load(open(os.path.join(tmp, "summary_requests.json")))
 check(len(q) == 1 and q[0]["summary"]["actionItems"] == ["我 · 准备材料"] and q[0]["summary"]["keyFacts"] == ["张峰参加下一轮"]
-      and q[0]["summary"]["bySpeaker"] == {"partner": ["流程第二轮"]} and q[0]["summary"]["by"] == "Sage", "queue content cleaned", q)
+      and q[0]["summary"]["bySpeaker"] == {"partner": ["流程第二轮"]} and q[0]["summary"]["by"] == "Copilot", "queue content cleaned", q)
 call("set_meeting_summary", meeting_id=m_call["id"], overview="第二版")
 q = json.load(open(os.path.join(tmp, "summary_requests.json")))
 check(len(q) == 1 and q[0]["summary"]["overview"] == "第二版", "same meeting keeps last only")

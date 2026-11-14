@@ -74,7 +74,7 @@ let appleEpochOffset = 978_307_200.0
 // 给 AI 看的时间与 App 界面同一个时区:出差时 Mac 时区在变,用户可以钉住一个。
 // 没设 = 本机时区(与旧版行为一致)。fmtTime 逐段调用,配置读取缓存 2 秒、格式器按
 // (时区, 格式)缓存。返回体只给换算好的时间,不带时区名 / 偏移,说明里也不提
-// (AI 只读时间不读时区——直发版 10-17 Rebecca 拍板)。
+// (AI 只读时间不读时区——直发版 10-17 定的)。
 // 落盘给 App 读的时间串(live_advice.json 的 updatedAt 等)不走这里,保持本机时区。
 enum DisplayTime {
     static let ttl: TimeInterval = 2
